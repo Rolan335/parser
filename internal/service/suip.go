@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Rolan335/parser/internal/domain"
@@ -39,34 +41,44 @@ func (s *Service) Parse(ctx context.Context, fileName string, src io.Reader) (*d
 	if err != nil {
 		return nil, err
 	}
-	size, err := io.Copy(tmp, src)
+	uploadSize, err := io.Copy(tmp, src)
 	tmp.Close()
 	if err != nil {
 		return nil, fmt.Errorf("write temp: %w", err)
 	}
 
-	raw, err := s.ex.Extract(path)
+	res, err := s.ex.Extract(path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrExtract, err)
 	}
-	for _, k := range systemFields {
-		delete(raw, k)
+	f := res.Fields
+
+	size := parseFileSize(f["File size"])
+	if size == 0 {
+		size = uploadSize
 	}
 
-	mimeType, _ := raw["MIMEType"].(string)
-	format, _ := raw["FileType"].(string)
-	title, _ := raw["Title"].(string)
-	producer, _ := raw["Producer"].(string)
-
 	m := &domain.FileMetadata{
-		FileName:  fileName,
-		SizeBytes: size,
-		MimeType:  mimeType,
-		Format:    format,
-		Title:     title,
-		Producer:  producer,
-		Raw:       raw,
-		CreatedAt: time.Now().UTC(),
+		FileName:       fileName,
+		SizeBytes:      size,
+		Producer:       f["Producer"],
+		Title:          f["Title"],
+		CreationDate:   f["CreationDate"],
+		Pages:          parseInt(f["Pages"]),
+		PDFVersion:     f["PDF version"],
+		PageSize:       f["Page size"],
+		PageRot:        parseInt(f["Page rot"]),
+		Form:           f["Form"],
+		Encrypted:      yes(f["Encrypted"]),
+		Optimized:      yes(f["Optimized"]),
+		Tagged:         yes(f["Tagged"]),
+		JavaScript:     yes(f["JavaScript"]),
+		CustomMetadata: yes(f["Custom Metadata"]),
+		MetadataStream: yes(f["Metadata Stream"]),
+		UserProperties: yes(f["UserProperties"]),
+		Suspects:       yes(f["Suspects"]),
+		RawHTML:        res.HTMLRaw,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	id, err := s.repo.Save(ctx, m)
@@ -79,4 +91,22 @@ func (s *Service) Parse(ctx context.Context, fileName string, src io.Reader) (*d
 
 func (s *Service) List(ctx context.Context, f domain.ListFilter) ([]domain.FileMetadata, error) {
 	return s.repo.List(ctx, f)
+}
+
+func yes(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), "yes")
+}
+
+func parseInt(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
+}
+
+func parseFileSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, ' '); i > 0 {
+		s = s[:i]
+	}
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }

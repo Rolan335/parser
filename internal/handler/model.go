@@ -1,20 +1,13 @@
 package handler
 
-import "time"
+import (
+	"time"
 
-type parseMetadata struct {
-	FileName  string         `json:"file_name"`
-	SizeBytes int64          `json:"size_bytes"`
-	MimeType  string         `json:"mime_type"`
-	Format    string         `json:"format"`
-	Title     string         `json:"title,omitempty"`
-	Producer  string         `json:"producer,omitempty"`
-	Raw       map[string]any `json:"raw"`
-	CreatedAt time.Time      `json:"created_at"`
-}
+	"github.com/Rolan335/parser/internal/domain"
+)
 
 type parseResponse struct {
-	parseMetadata
+	domain.FileMetadata
 	File attachedFile `json:"file"`
 }
 
@@ -24,11 +17,11 @@ type attachedFile struct {
 }
 
 type listQuery struct {
-	FileName string     `form:"file_name"`
-	MimeType string     `form:"mime_type"`
-	Format   string     `form:"format"`
-	From     *time.Time `form:"from"`
-	To       *time.Time `form:"to"`
-	Limit    int        `form:"limit"  binding:"gte=0"`
-	Offset   int        `form:"offset" binding:"gte=0"`
+	FileName   string     `form:"file_name"`
+	Producer   string     `form:"producer"`
+	PDFVersion string     `form:"pdf_version"`
+	From       *time.Time `form:"from"`
+	To         *time.Time `form:"to"`
+	Limit      int        `form:"limit"  binding:"gte=0"`
+	Offset     int        `form:"offset" binding:"gte=0"`
 }

@@ -3,7 +3,6 @@ module github.com/Rolan335/parser
 go 1.25
 
 require (
-	github.com/barasher/go-exiftool v1.10.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jackc/pgx/v5 v5.7.1

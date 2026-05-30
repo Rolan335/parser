@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -55,27 +54,11 @@ func (h *Handler) Parse(c *gin.Context) {
 		return
 	}
 
-	meta := parseMetadata{
-		FileName:  m.FileName,
-		SizeBytes: m.SizeBytes,
-		MimeType:  m.MimeType,
-		Format:    m.Format,
-		Title:     m.Title,
-		Producer:  m.Producer,
-		Raw:       m.Raw,
-		CreatedAt: m.CreatedAt,
-	}
-	body, err := json.Marshal(meta)
-	if err != nil {
-		h.log.Error("marshal response", "err", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
 	c.JSON(http.StatusOK, parseResponse{
-		parseMetadata: meta,
+		FileMetadata: *m,
 		File: attachedFile{
-			Name:          fmt.Sprintf("%s.meta.json", name),
-			ContentBase64: base64.StdEncoding.EncodeToString(body),
+			Name:          fmt.Sprintf("%s.html", name),
+			ContentBase64: base64.StdEncoding.EncodeToString(m.RawHTML),
 		},
 	})
 }

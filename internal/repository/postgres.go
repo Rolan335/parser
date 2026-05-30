@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,14 +23,13 @@ func New(pool *pgxpool.Pool) *PgRepository {
 }
 
 func (r *PgRepository) Save(ctx context.Context, m *domain.FileMetadata) (int64, error) {
-	raw, err := json.Marshal(m.Raw)
-	if err != nil {
-		return 0, fmt.Errorf("marshal raw: %w", err)
-	}
 	var id int64
-	err = r.pool.QueryRow(ctx, insertFileMetadataSQL,
-		m.FileName, m.SizeBytes, m.MimeType, m.Format,
-		m.Title, m.Producer, raw, m.CreatedAt,
+	err := r.pool.QueryRow(ctx, insertFileMetadataSQL,
+		m.FileName, m.SizeBytes, m.Producer, m.Title, m.CreationDate,
+		m.Pages, m.PDFVersion, m.PageSize, m.PageRot, m.Form,
+		m.Encrypted, m.Optimized, m.Tagged, m.JavaScript,
+		m.CustomMetadata, m.MetadataStream, m.UserProperties, m.Suspects,
+		m.RawHTML, m.CreatedAt,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert metadata: %w", err)
@@ -41,7 +39,7 @@ func (r *PgRepository) Save(ctx context.Context, m *domain.FileMetadata) (int64,
 
 func (r *PgRepository) List(ctx context.Context, f domain.ListFilter) ([]domain.FileMetadata, error) {
 	rows, err := r.pool.Query(ctx, listFileMetadataSQL,
-		f.FileName, f.MimeType, f.Format,
+		f.FileName, f.Producer, f.PDFVersion,
 		f.From, f.To,
 		f.Limit, f.Offset,
 	)
@@ -53,15 +51,15 @@ func (r *PgRepository) List(ctx context.Context, f domain.ListFilter) ([]domain.
 	out := make([]domain.FileMetadata, 0)
 	for rows.Next() {
 		var m domain.FileMetadata
-		var raw []byte
-		if err := rows.Scan(&m.ID, &m.FileName, &m.SizeBytes, &m.MimeType, &m.Format,
-			&m.Title, &m.Producer, &raw, &m.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&m.ID, &m.FileName, &m.SizeBytes,
+			&m.Producer, &m.Title, &m.CreationDate,
+			&m.Pages, &m.PDFVersion, &m.PageSize, &m.PageRot, &m.Form,
+			&m.Encrypted, &m.Optimized, &m.Tagged, &m.JavaScript,
+			&m.CustomMetadata, &m.MetadataStream, &m.UserProperties, &m.Suspects,
+			&m.RawHTML, &m.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &m.Raw); err != nil {
-				return nil, fmt.Errorf("unmarshal raw id=%d: %w", m.ID, err)
-			}
 		}
 		out = append(out, m)
 	}

@@ -52,19 +52,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	ex, err := extractor.New()
-	if err != nil {
-		log.Error("exiftool", "err", err)
-		os.Exit(1)
-	}
-	defer ex.Close()
-
-	svc := service.New(ex, repository.New(pool))
+	svc := service.New(extractor.New(), repository.New(pool))
 	h := handler.New(svc, log)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = 8 << 20
-	g := r.Group("/suip-data")
+	g := r.Group("/pdfyear-data")
 	g.POST("/parse", h.Parse)
 	g.GET("", h.List)
 

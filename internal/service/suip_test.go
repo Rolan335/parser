@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/Rolan335/parser/internal/domain"
+	"github.com/Rolan335/parser/internal/extractor"
 )
 
 type mockExtractor struct {
-	fn func(path string) (map[string]any, error)
+	fn func(path string) (extractor.Result, error)
 }
 
-func (m *mockExtractor) Extract(path string) (map[string]any, error) { return m.fn(path) }
+func (m *mockExtractor) Extract(path string) (extractor.Result, error) { return m.fn(path) }
 
 type mockRepo struct {
 	saveFn func(ctx context.Context, m *domain.FileMetadata) (int64, error)
@@ -31,35 +32,44 @@ func (m *mockRepo) List(ctx context.Context, f domain.ListFilter) ([]domain.File
 	return m.listFn(ctx, f)
 }
 
-// errReader всегда возвращает ошибку на Read.
 type errReader struct{ err error }
 
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
+func result(fields map[string]string, html string) extractor.Result {
+	return extractor.Result{Fields: fields, HTMLRaw: []byte(html)}
+}
+
 func TestParse_Success(t *testing.T) {
-	rawFromExif := map[string]any{
-		"MIMEType":            "application/pdf",
-		"FileType":            "PDF",
-		"Title":               "Hello",
-		"Producer":            "TestProd",
-		"PageCount":           3,
-		"Directory":           "/tmp/parser-xxx",
-		"SourceFile":          "/tmp/parser-xxx/foo.pdf",
-		"FilePermissions":     "-rw-r--r--",
-		"FileAccessDate":      "2026:01:01 00:00:00+00:00",
-		"FileModifyDate":      "2026:01:01 00:00:00+00:00",
-		"FileInodeChangeDate": "2026:01:01 00:00:00+00:00",
-		"ExifToolVersion":     12.57,
+	fields := map[string]string{
+		"Producer":        "cairo 1.16.0",
+		"Title":           "Hello",
+		"CreationDate":    "Thu Feb 26 19:47:07 2026 CET",
+		"Pages":           "4",
+		"PDF version":     "1.5",
+		"Page size":       "595.276 x 841.89 pts (A4)",
+		"Page rot":        "0",
+		"Form":            "none",
+		"Encrypted":       "no",
+		"Optimized":       "no",
+		"Tagged":          "yes",
+		"JavaScript":      "no",
+		"Custom Metadata": "no",
+		"Metadata Stream": "yes",
+		"UserProperties":  "no",
+		"Suspects":        "no",
+		"File size":       "173444 bytes",
 	}
+	htmlSnippet := `<textarea class="form-control textarea">Producer: cairo</textarea>`
 
 	var (
 		gotPath  string
 		gotSaved *domain.FileMetadata
 	)
 	ex := &mockExtractor{
-		fn: func(path string) (map[string]any, error) {
+		fn: func(path string) (extractor.Result, error) {
 			gotPath = path
-			return rawFromExif, nil
+			return result(fields, htmlSnippet), nil
 		},
 	}
 	repo := &mockRepo{
@@ -79,53 +89,59 @@ func TestParse_Success(t *testing.T) {
 		t.Errorf("ID = %d, want 42", got.ID)
 	}
 	if got.FileName != "foo.pdf" {
-		t.Errorf("FileName = %q, want foo.pdf", got.FileName)
+		t.Errorf("FileName = %q", got.FileName)
 	}
-	if got.SizeBytes != int64(len("fake pdf content")) {
-		t.Errorf("SizeBytes = %d, want %d", got.SizeBytes, len("fake pdf content"))
+	if got.SizeBytes != 173444 {
+		t.Errorf("SizeBytes = %d", got.SizeBytes)
 	}
-	if got.MimeType != "application/pdf" {
-		t.Errorf("MimeType = %q", got.MimeType)
-	}
-	if got.Format != "PDF" {
-		t.Errorf("Format = %q", got.Format)
+	if got.Producer != "cairo 1.16.0" {
+		t.Errorf("Producer = %q", got.Producer)
 	}
 	if got.Title != "Hello" {
 		t.Errorf("Title = %q", got.Title)
 	}
-	if got.Producer != "TestProd" {
-		t.Errorf("Producer = %q", got.Producer)
+	if got.CreationDate != "Thu Feb 26 19:47:07 2026 CET" {
+		t.Errorf("CreationDate = %q", got.CreationDate)
+	}
+	if got.Pages != 4 {
+		t.Errorf("Pages = %d", got.Pages)
+	}
+	if got.PDFVersion != "1.5" {
+		t.Errorf("PDFVersion = %q", got.PDFVersion)
+	}
+	if got.PageSize != "595.276 x 841.89 pts (A4)" {
+		t.Errorf("PageSize = %q", got.PageSize)
+	}
+	if got.Form != "none" {
+		t.Errorf("Form = %q", got.Form)
+	}
+	if got.Encrypted || got.Optimized || got.JavaScript || got.CustomMetadata || got.UserProperties || got.Suspects {
+		t.Errorf("ожидал yes-флаги только у Tagged и MetadataStream, got = %+v", got)
+	}
+	if !got.Tagged || !got.MetadataStream {
+		t.Errorf("Tagged/MetadataStream должны быть true")
+	}
+	if string(got.RawHTML) != htmlSnippet {
+		t.Errorf("RawHTML = %q, want %q", got.RawHTML, htmlSnippet)
 	}
 	if time.Since(got.CreatedAt) > time.Minute {
 		t.Errorf("CreatedAt suspicious: %v", got.CreatedAt)
 	}
-
 	if filepath.Base(gotPath) != "foo.pdf" {
-		t.Errorf("extractor got path = %q, want basename foo.pdf", gotPath)
+		t.Errorf("extractor path = %q", gotPath)
 	}
-
-	for _, k := range systemFields {
-		if _, ok := got.Raw[k]; ok {
-			t.Errorf("system field %q should have been stripped from raw", k)
-		}
-	}
-	if _, ok := got.Raw["PageCount"]; !ok {
-		t.Errorf("non-system field PageCount missing from raw")
-	}
-
 	if gotSaved != got {
 		t.Errorf("repo.Save received different *FileMetadata than was returned")
 	}
 }
 
 func TestParse_FallbackFilename(t *testing.T) {
-	cases := []string{"", ".", "/"}
-	for _, in := range cases {
+	for _, in := range []string{"", ".", "/"} {
 		t.Run("input="+in, func(t *testing.T) {
 			var gotPath string
-			ex := &mockExtractor{fn: func(path string) (map[string]any, error) {
+			ex := &mockExtractor{fn: func(path string) (extractor.Result, error) {
 				gotPath = path
-				return map[string]any{}, nil
+				return result(map[string]string{}, ""), nil
 			}}
 			repo := &mockRepo{saveFn: func(context.Context, *domain.FileMetadata) (int64, error) {
 				return 1, nil
@@ -141,9 +157,27 @@ func TestParse_FallbackFilename(t *testing.T) {
 	}
 }
 
+func TestParse_SizeFallbackToUpload(t *testing.T) {
+	ex := &mockExtractor{fn: func(string) (extractor.Result, error) {
+		return result(map[string]string{"PDF version": "1.7"}, ""), nil
+	}}
+	repo := &mockRepo{saveFn: func(context.Context, *domain.FileMetadata) (int64, error) {
+		return 1, nil
+	}}
+
+	upload := "fake pdf content"
+	got, err := New(ex, repo).Parse(context.Background(), "x.pdf", bytes.NewBufferString(upload))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.SizeBytes != int64(len(upload)) {
+		t.Errorf("SizeBytes = %d, want upload size %d", got.SizeBytes, len(upload))
+	}
+}
+
 func TestParse_ExtractorError(t *testing.T) {
-	boom := errors.New("exiftool blew up")
-	ex := &mockExtractor{fn: func(string) (map[string]any, error) { return nil, boom }}
+	boom := errors.New("pdfyeah blew up")
+	ex := &mockExtractor{fn: func(string) (extractor.Result, error) { return extractor.Result{}, boom }}
 	repo := &mockRepo{saveFn: func(context.Context, *domain.FileMetadata) (int64, error) {
 		t.Fatal("repo.Save should not be called when extractor fails")
 		return 0, nil
@@ -160,8 +194,8 @@ func TestParse_ExtractorError(t *testing.T) {
 
 func TestParse_RepoError(t *testing.T) {
 	boom := errors.New("db down")
-	ex := &mockExtractor{fn: func(string) (map[string]any, error) {
-		return map[string]any{"FileType": "PDF"}, nil
+	ex := &mockExtractor{fn: func(string) (extractor.Result, error) {
+		return result(map[string]string{"PDF version": "1.5"}, ""), nil
 	}}
 	repo := &mockRepo{saveFn: func(context.Context, *domain.FileMetadata) (int64, error) {
 		return 0, boom
@@ -175,9 +209,9 @@ func TestParse_RepoError(t *testing.T) {
 
 func TestParse_ReaderError(t *testing.T) {
 	boom := errors.New("read failed")
-	ex := &mockExtractor{fn: func(string) (map[string]any, error) {
+	ex := &mockExtractor{fn: func(string) (extractor.Result, error) {
 		t.Fatal("extractor should not be called when reader fails")
-		return nil, nil
+		return extractor.Result{}, nil
 	}}
 	repo := &mockRepo{}
 
@@ -189,7 +223,7 @@ func TestParse_ReaderError(t *testing.T) {
 
 func TestList(t *testing.T) {
 	want := []domain.FileMetadata{{ID: 1, FileName: "a"}, {ID: 2, FileName: "b"}}
-	wantFilter := domain.ListFilter{MimeType: "application/pdf", Limit: 10}
+	wantFilter := domain.ListFilter{Producer: "cairo 1.16.0", Limit: 10}
 
 	var gotFilter domain.ListFilter
 	repo := &mockRepo{listFn: func(_ context.Context, f domain.ListFilter) ([]domain.FileMetadata, error) {
@@ -221,4 +255,4 @@ func TestList_Error(t *testing.T) {
 	}
 }
 
-var _ io.Reader = errReader{} // ensure errReader satisfies io.Reader at compile time
+var _ io.Reader = errReader{}
